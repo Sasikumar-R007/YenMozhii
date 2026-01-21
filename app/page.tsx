@@ -5,6 +5,7 @@ import TechnologyOverview from '@/components/sections/TechnologyOverview'
 import KeyFeatures from '@/components/sections/KeyFeatures'
 import TargetUsers from '@/components/sections/TargetUsers'
 import FieldVisit from '@/components/sections/FieldVisit'
+import SampleAudios from '@/components/sections/SampleAudios'
 import DevelopmentJourney from '@/components/sections/DevelopmentJourney'
 import VisionFuture from '@/components/sections/VisionFuture'
 import Team from '@/components/sections/Team'
@@ -20,6 +21,7 @@ export default function Home() {
       <KeyFeatures />
       <TargetUsers />
       <FieldVisit />
+      <SampleAudios />
       <DevelopmentJourney />
       <VisionFuture />
       <Team />

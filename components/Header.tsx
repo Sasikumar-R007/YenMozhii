@@ -16,6 +16,7 @@ export default function Header() {
     { href: '/#solution', label: 'Solution', section: 'solution' },
     { href: '/#technology', label: 'Technology', section: 'technology' },
     { href: '/demo', label: 'Live Demo', section: 'demo' },
+    { href: '/#sample-audios', label: 'Samples', section: 'sample-audios' },
     { href: '/#contact', label: 'Contact', section: 'contact' },
   ]
 
@@ -26,7 +27,7 @@ export default function Header() {
     }
 
     const handleScroll = () => {
-      const sections = ['problem', 'solution', 'technology', 'contact']
+      const sections = ['problem', 'solution', 'technology', 'sample-audios', 'contact']
       const scrollPosition = window.scrollY + 100
 
       for (const section of sections) {
