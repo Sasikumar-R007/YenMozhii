@@ -20,8 +20,6 @@
 
 // ... OLD CODE CONTINUES ...
 
-'use client'
-
 import { useState, useEffect, useRef } from 'react'
 import Image from 'next/image'
 import Script from 'next/script'
