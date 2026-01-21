@@ -2,10 +2,12 @@
 const nextConfig = {
   reactStrictMode: true,
   // Allow serving binary files from public directory
-  webpack: (config) => {
-    config.resolve.fallback = {
-      ...config.resolve.fallback,
-      fs: false,
+  webpack: (config, { isServer }) => {
+    if (!isServer) {
+      config.resolve.fallback = {
+        ...config.resolve.fallback,
+        fs: false,
+      }
     }
     return config
   },
