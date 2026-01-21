@@ -35,3 +35,7 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# Demo folder - old project files (not needed for production)
+/Demo
+/Demo/**
+
