@@ -113,7 +113,7 @@ export default function Solution() {
                 making it reliable in any environment—home, school, or public spaces.
               </p>
               <p className="text-neutral-600 leading-relaxed">
-                Affordable and designed for accessibility, ensuring that cost doesn't become a barrier to communication.
+                Affordable and designed for accessibility, ensuring that cost doesn&apos;t become a barrier to communication.
               </p>
             </div>
           </motion.div>
@@ -141,15 +141,15 @@ export default function Solution() {
             </div>
             <div className="flex-grow flex flex-col justify-center">
             <blockquote className="text-center text-lg text-neutral-700 italic mb-6 border-l-4 border-neutral-400 pl-6">
-              "என் மொழி எனக்கு வழங்கும் சுதந்திரம்"
+              &quot;என் மொழி எனக்கு வழங்கும் சுதந்திரம்&quot;
               <br />
               <span className="text-base text-neutral-600 mt-2 block">
-                "My voice, my freedom"
+                &quot;My voice, my freedom&quot;
               </span>
             </blockquote>
             <p className="text-neutral-600 text-center leading-relaxed">
               YenMozhi empowers individuals to express themselves naturally, 
-              in moments that matter—whether it's asking for help, expressing emotions, 
+              in moments that matter—whether it&apos;s asking for help, expressing emotions, 
               or simply being heard.
             </p>
             </div>

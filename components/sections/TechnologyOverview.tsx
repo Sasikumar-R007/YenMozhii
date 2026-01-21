@@ -39,7 +39,7 @@ export default function TechnologyOverview() {
             Technology & System Overview
           </h2>
           <p className="text-lg text-neutral-600 max-w-3xl mx-auto">
-            A high-level view of YenMozhi's modular architecture, designed for reliability and real-world deployment.
+            A high-level view of YenMozhi&apos;s modular architecture, designed for reliability and real-world deployment.
           </p>
         </motion.div>
 

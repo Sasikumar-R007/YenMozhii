@@ -18,7 +18,7 @@ export default function Contact() {
           </h2>
           <p className="text-lg text-neutral-600 max-w-3xl mx-auto">
             Interested in collaborating, piloting YenMozhi, or supporting our mission? 
-            We'd love to hear from you.
+            We&apos;d love to hear from you.
           </p>
         </motion.div>
 
@@ -84,7 +84,7 @@ export default function Contact() {
               Collaborate / Pilot / Support
             </h3>
             <p className="text-neutral-300 leading-relaxed mb-6">
-              We're looking for partners who share our vision:
+              We&apos;re looking for partners who share our vision:
             </p>
             <ul className="space-y-3 mb-8 text-neutral-300">
               <li className="flex items-start space-x-2">
