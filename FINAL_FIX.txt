@@ -1,0 +1,11 @@
+COMPLETE FIX - FOLLOW THESE EXACT STEPS:
+
+1. REMOVE Demo FOLDER FROM GIT:
+   git rm -r --cached Demo
+   git add .gitignore
+   git commit -m "Remove Demo folder from repository"
+   git push origin main
+
+2. WAIT 2-3 minutes, then deploy on Vercel
+
+3. The Demo folder is now ignored and won't be included in builds
