@@ -15,8 +15,8 @@ export default function Header() {
     { href: '/#problem', label: 'Problem', section: 'problem' },
     { href: '/#solution', label: 'Solution', section: 'solution' },
     { href: '/#technology', label: 'Technology', section: 'technology' },
-    { href: '/demo', label: 'Live Demo', section: 'demo' },
     { href: '/#sample-audios', label: 'Samples', section: 'sample-audios' },
+    { href: '/demo', label: 'Live Demo', section: 'demo', isButton: true },
     { href: '/#contact', label: 'Contact', section: 'contact' },
   ]
 
@@ -80,6 +80,23 @@ export default function Header() {
                 ? pathname === item.href
                 : activeSection === item.section
               
+              // Button style for Live Demo
+              if (item.isButton) {
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                      isActive
+                        ? 'bg-primary-100 text-primary-700 border border-primary-200'
+                        : 'bg-neutral-100 text-neutral-700 hover:bg-neutral-200 border border-neutral-200'
+                    }`}
+                  >
+                    {item.label}
+                  </Link>
+                )
+              }
+              
               return (
                 <Link
                   key={item.href}
@@ -131,6 +148,24 @@ export default function Header() {
               const isActive = pathname === '/demo' 
                 ? pathname === item.href
                 : activeSection === item.section
+              
+              // Button style for Live Demo on mobile
+              if (item.isButton) {
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    onClick={() => setIsMenuOpen(false)}
+                    className={`block px-4 py-2 rounded-lg text-sm font-medium text-center ${
+                      isActive
+                        ? 'bg-primary-100 text-primary-700 border border-primary-200'
+                        : 'bg-neutral-100 text-neutral-700 hover:bg-neutral-200 border border-neutral-200'
+                    }`}
+                  >
+                    {item.label}
+                  </Link>
+                )
+              }
               
               return (
                 <Link

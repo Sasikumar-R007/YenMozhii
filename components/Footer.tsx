@@ -44,7 +44,15 @@ export default function Footer() {
           <div>
             <h3 className="text-white font-semibold mb-4">Contact</h3>
             <p className="text-sm text-neutral-400 mb-2">
-              Team Symphonix
+              Team{' '}
+              <a 
+                href="https://symphonixtech.vercel.app/" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="text-primary-400 hover:text-primary-300 underline transition-colors"
+              >
+                Symphonix
+              </a>
             </p>
             <p className="text-sm text-neutral-400">
               For collaborations, pilot programs, and support inquiries.

@@ -29,7 +29,7 @@ export default function SampleAudios() {
     },
     {
       id: 'bathroom-varudhu',
-      tamilText: 'குளியலறை வருது',
+      tamilText: 'குளியலறைக்கு போகணும்',
       englishTranslation: 'I need to go to bathroom',
       audioPath: '/assests/Bathroom varudhu.m4a',
     },

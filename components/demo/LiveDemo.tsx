@@ -56,10 +56,14 @@ export default function LiveDemo() {
   const recognizerRef = useRef<any>(null)
   const lastSpokenRef = useRef('')
   const lastSpokenTimeRef = useRef(0)
-  // Lower threshold for better detection (0.75 = 75% confidence)
+  const lastCandidateRef = useRef('')
+  const candidateSinceRef = useRef(0)
+  // Threshold for detection (0.75 = 75% confidence)
   const threshold = 0.75
-  // Cooldown to prevent duplicate speech (in milliseconds) - increased for clearer output
-  const cooldown = 2000
+  // Cooldown between spoken outputs (ms) - wait before accepting next detection
+  const cooldown = 4000
+  // Settling window (ms) - same label must be top for this long before we speak
+  const settlingMs = 800
   // Use remote Teachable Machine model (same as old project) - has all 8 classes
   const MODEL_URL = 'https://teachablemachine.withgoogle.com/models/GmzaS6iNB/'
 
@@ -112,19 +116,38 @@ export default function LiveDemo() {
     return () => clearInterval(interval)
   }, [tfLoaded, speechCommandsLoaded])
 
-  // Load voices
+  // Load voices - Filter to show only Tamil and English (3 max) voices
   useEffect(() => {
     const populateVoices = () => {
       const availableVoices = speechSynthesis.getVoices()
-      const filteredVoices = availableVoices.filter(
-        (v) =>
-          v.lang.toLowerCase().includes('en') ||
-          v.lang.toLowerCase().includes('ta') ||
-          v.lang.toLowerCase().includes('ml')
+
+      // Get all Tamil voices
+      const tamilVoices = availableVoices.filter((v) =>
+        v.lang.toLowerCase().includes('ta')
       )
+
+      // Get only first 3 English voices
+      const englishVoices = availableVoices
+        .filter((v) => v.lang.toLowerCase().includes('en'))
+        .slice(0, 3) // Limit to 3 English voices
+
+      // Combine: Tamil first, then English (max 3)
+      const filteredVoices = [...tamilVoices, ...englishVoices]
+
       setVoices(filteredVoices)
+
+      // Auto-select Tamil voice if available, otherwise first available
       if (filteredVoices.length > 0 && !selectedVoice) {
-        setSelectedVoice('0')
+        const tamilIndex = tamilVoices.length > 0 ? 0 : 0
+        setSelectedVoice(tamilIndex.toString())
+
+        // Log available voices for debugging
+        console.log('🎤 Filtered voices (Tamil + 3 English):', filteredVoices.map((v, i) => ({
+          index: i,
+          name: v.name,
+          lang: v.lang,
+          isTamil: v.lang.toLowerCase().includes('ta')
+        })))
       }
     }
 
@@ -152,7 +175,7 @@ export default function LiveDemo() {
       // Build model URLs (works for both remote Teachable Machine and local files)
       let checkpointURL: string
       let metadataURL: string
-      
+
       if (MODEL_URL.startsWith('http')) {
         // Remote Teachable Machine URL
         checkpointURL = MODEL_URL + 'model.json'
@@ -163,10 +186,10 @@ export default function LiveDemo() {
         checkpointURL = baseURL + MODEL_URL + 'model.json'
         metadataURL = baseURL + MODEL_URL + 'metadata.json'
       }
-      
+
       console.log('📦 Loading model from:', checkpointURL)
       console.log('📋 Metadata URL:', metadataURL)
-      
+
       // Verify files exist first (skip for remote models as they're always accessible)
       if (!MODEL_URL.startsWith('http')) {
         try {
@@ -176,13 +199,13 @@ export default function LiveDemo() {
           if (!modelResponse.ok) {
             throw new Error(`Model file not found (${modelResponse.status}). Check if model.json exists in /public/model/`)
           }
-          
+
           const metadataResponse = await fetch(metadataURL)
           console.log('Metadata file response:', metadataResponse.status, metadataResponse.statusText)
           if (!metadataResponse.ok) {
             throw new Error(`Metadata file not found (${metadataResponse.status}). Check if metadata.json exists in /public/model/`)
           }
-          
+
           // Check weights.bin for local models
           const baseURL = typeof window !== 'undefined' ? window.location.origin : ''
           const weightsResponse = await fetch(baseURL + MODEL_URL + 'weights.bin', { method: 'HEAD' })
@@ -190,7 +213,7 @@ export default function LiveDemo() {
           if (!weightsResponse.ok) {
             console.warn('⚠️ weights.bin might not be accessible:', weightsResponse.status)
           }
-          
+
           console.log('✅ Model files found and accessible')
         } catch (fetchError) {
           console.error('❌ Error fetching model files:', fetchError)
@@ -199,21 +222,21 @@ export default function LiveDemo() {
       } else {
         console.log('✅ Using remote Teachable Machine model')
       }
-      
+
       console.log('🔨 Creating recognizer...')
       console.log('TensorFlow.js available:', !!window.tf)
       console.log('Speech Commands available:', !!window.speechCommands)
       console.log('speechCommands.create function:', typeof window.speechCommands?.create)
-      
+
       if (!window.speechCommands || typeof window.speechCommands.create !== 'function') {
         throw new Error('Speech Commands API not fully loaded. Please refresh the page.')
       }
-      
+
       // Verify TensorFlow.js is loaded
       if (!window.tf) {
         throw new Error('TensorFlow.js not loaded. Please wait for scripts to load.')
       }
-      
+
       // CRITICAL: Ensure TensorFlow.js backend is ready FIRST
       console.log('⏳ Ensuring TensorFlow.js backend is ready...')
       if (window.tf.ready) {
@@ -222,7 +245,7 @@ export default function LiveDemo() {
       // Additional wait to ensure backend is fully initialized
       await new Promise(resolve => setTimeout(resolve, 100))
       console.log('✅ TensorFlow.js backend ready')
-      
+
       // CRITICAL: Verify tf.util exists after ready() (Speech Commands needs this)
       if (!window.tf || !window.tf.util) {
         console.error('❌ TensorFlow.js state:', {
@@ -233,12 +256,12 @@ export default function LiveDemo() {
         })
         throw new Error('TensorFlow.js util not available after initialization. Please refresh the page.')
       }
-      
+
       // CRITICAL: Verify Speech Commands can access TensorFlow.js
       if (!window.speechCommands || typeof window.speechCommands.create !== 'function') {
         throw new Error('Speech Commands API not available. Please refresh the page.')
       }
-      
+
       let rec
       try {
         // Final verification that tf.util is accessible (required by Speech Commands)
@@ -246,7 +269,7 @@ export default function LiveDemo() {
         if (!tfUtilCheck) {
           throw new Error('tf.util is undefined. TensorFlow.js may not be fully initialized.')
         }
-        
+
         console.log('Creating recognizer with:', {
           checkpointURL,
           metadataURL,
@@ -255,7 +278,7 @@ export default function LiveDemo() {
           speechCommandsCreateExists: typeof window.speechCommands?.create === 'function',
           tfVersion: window.tf?.version?.tfjs || 'unknown'
         })
-        
+
         // Create recognizer - Speech Commands will internally access tf.util
         rec = window.speechCommands.create(
           'BROWSER_FFT',
@@ -279,7 +302,7 @@ export default function LiveDemo() {
         const createErrorMsg = createError instanceof Error ? createError.message : String(createError) || 'Unknown error creating recognizer'
         throw new Error(`Failed to create recognizer: ${createErrorMsg}. TensorFlow.js may not be fully initialized. Try refreshing the page.`)
       }
-      
+
       console.log('⏳ Loading model weights (this may take a moment)...')
       try {
         await rec.ensureModelLoaded()
@@ -296,7 +319,7 @@ export default function LiveDemo() {
         const loadErrorMsg = loadError instanceof Error ? loadError.message : String(loadError) || 'Unknown error loading model'
         throw new Error(`Model weights failed to load: ${loadErrorMsg}. Check if weights.bin is accessible at ${MODEL_URL}weights.bin`)
       }
-      
+
       setErrorMessage('')
       return rec
     } catch (error) {
@@ -315,28 +338,28 @@ export default function LiveDemo() {
     }
   }
 
-  // Map model labels to spoken text (Tamil phrases to English)
+  // Map model labels to spoken text (Tamil phrases)
   const getSpokenText = (label: string): string => {
-    // Map all Tamil labels to human-readable English speech text
+    // Map all labels to Tamil text for pronunciation
     const labelMap: { [key: string]: string } = {
       'Background Noise': '', // Don't speak background noise
-      'thanni venum': 'I need water',
-      'bathroom varuthu': 'I need to go to the bathroom',
-      'pasikudhu': 'I am hungry',
-      'kai valikuthu': 'My hand is paining',
-      'amma va kooputunga': 'Mom please come',
-      'maathara thaanga': 'Please wait a minute',
-      'thirupi paduka vainga': 'Please turn around',
+      'thanni venum': 'தண்ணி வேணும்',
+      'bathroom varuthu': 'குளியலறைக்கு போகணும்',
+      'pasikudhu': 'பசிக்குது',
+      'kai valikuthu': 'கை வலிக்குது',
+      'amma va kooputunga': 'அம்மா வா கூப்பிடுங்க',
+      'maathara thaanga': 'மாத்திர தங்க',
+      'thirupi paduka vainga': 'திருப்பி படுக்க வையுங்க',
       // Alternative spellings (if model has variations)
-      'pasikkudhu': 'I am hungry',
-      'kai valikkudhu': 'My hand is paining',
+      'pasikkudhu': 'பசிக்குது',
+      'kai valikkudhu': 'கை வலிக்குது',
     }
-    
+
     // If no mapping exists, use the label directly
     const mappedText = labelMap[label]
     if (mappedText === '') return '' // Explicitly skip if mapped to empty string
     if (mappedText) return mappedText // Use mapped text if available
-    
+
     // Default: use label as-is (will speak the Tamil phrase if no mapping)
     return label
   }
@@ -347,13 +370,13 @@ export default function LiveDemo() {
       console.error('❌ Speech synthesis not available in this browser')
       return
     }
-    
+
     // Skip background noise and empty text
     if (!text || text.trim() === '' || text === 'Background Noise') {
       console.warn(`⚠️ Skipping speech: invalid label "${text}"`)
       return
     }
-    
+
     const now = Date.now()
     if (now - lastSpokenTimeRef.current < cooldown && text === lastSpokenRef.current) {
       console.log('⏸️ Speech skipped: cooldown active')
@@ -363,7 +386,7 @@ export default function LiveDemo() {
     // Get the spoken text (may be different from label)
     const spokenText = getSpokenText(text)
     console.log(`🗣️ Speech preparation: label="${text}" → spoken="${spokenText}"`)
-    
+
     if (!spokenText || spokenText.trim() === '') {
       console.error(`❌ No spoken text for label: "${text}" - check label mapping in getSpokenText()`)
       return
@@ -371,23 +394,37 @@ export default function LiveDemo() {
 
     console.log(`🔊 Speaking now: "${spokenText}"`)
     const utterance = new SpeechSynthesisUtterance(spokenText)
-    
-    // Set voice if available
-    if (voices.length && selectedVoice) {
-      utterance.voice = voices[parseInt(selectedVoice)]
+
+    // Set language to Tamil for all outputs (must be set before voice)
+    utterance.lang = 'ta-IN' // Tamil for proper pronunciation
+
+    // Prioritize Tamil voices for Tamil text
+    if (voices.length > 0) {
+      // Find Tamil voice first
+      const tamilVoice = voices.find((v) => v.lang.toLowerCase().includes('ta'))
+
+      if (tamilVoice) {
+        utterance.voice = tamilVoice
+        console.log('🗣️ Using Tamil voice:', tamilVoice.name, tamilVoice.lang)
+      } else if (selectedVoice) {
+        // Fallback to selected voice if no Tamil voice
+        utterance.voice = voices[parseInt(selectedVoice)]
+        console.log('🗣️ Using fallback voice:', voices[parseInt(selectedVoice)].name, voices[parseInt(selectedVoice)].lang)
+        console.warn('⚠️ No Tamil voice found. Speech may not be accurate.')
+      } else {
+        // Use first available voice
+        utterance.voice = voices[0]
+        console.log('🗣️ Using default voice:', voices[0].name, voices[0].lang)
+        console.warn('⚠️ No Tamil voice found. Speech may not be accurate.')
+      }
+    } else {
+      console.warn('⚠️ No voices available. Speech may not work.')
     }
-    
+
     // Enhanced voice settings for clear, loud output
     utterance.pitch = 1.0 // Normal pitch
-    utterance.rate = 0.9  // Slightly slower for clarity
+    utterance.rate = 0.85  // Slower for better Tamil pronunciation
     utterance.volume = 1.0 // Maximum volume
-    
-    // Set language for better pronunciation
-    if (spokenText.includes('water') || spokenText.toLowerCase().includes('i need')) {
-      utterance.lang = 'en-US' // English
-    } else {
-      utterance.lang = 'ta-IN' // Tamil (if Tamil text detected)
-    }
 
     setIsSpeaking(true)
     setSpeakText(spokenText)
@@ -399,10 +436,20 @@ export default function LiveDemo() {
       }, 400)
     }
 
-    utterance.onerror = (event) => {
-      console.error('Speech synthesis error:', event)
+    utterance.onerror = (event: SpeechSynthesisErrorEvent) => {
+      console.error('❌ Speech synthesis error:', event)
+      console.error('Error type:', event.error)
       setIsSpeaking(false)
       setSpeakText('')
+
+      const err = String(event.error || '')
+      if (err.includes('language') || err.includes('voice') || err === 'not-allowed') {
+        console.error('⚠️ Tamil TTS may not be supported in this browser. Try using Chrome or Edge for better Tamil voice support.')
+      }
+    }
+
+    utterance.onstart = () => {
+      console.log('✅ Speech started successfully')
     }
 
     // Cancel any ongoing speech and speak immediately
@@ -417,23 +464,23 @@ export default function LiveDemo() {
   const startListening = async () => {
     try {
       setIsLoadingModel(true)
-      
+
       // Check if TensorFlow.js and Speech Commands are loaded
       if (!window.tf) {
         throw new Error('TensorFlow.js not loaded. Please wait for scripts to load and try again.')
       }
-      
+
       if (!window.speechCommands || typeof window.speechCommands.create !== 'function') {
         throw new Error('Speech Commands library not fully loaded. Please wait a moment and try again, or refresh the page.')
       }
-      
+
       // Ensure TensorFlow.js backend is ready
       if (window.tf.ready) {
         console.log('⏳ Waiting for TensorFlow.js backend to be ready...')
         await window.tf.ready()
         console.log('✅ TensorFlow.js backend ready')
       }
-      
+
       if (!recognizerRef.current) {
         console.log('🔨 Creating model...')
         recognizerRef.current = await createModel()
@@ -447,74 +494,79 @@ export default function LiveDemo() {
       recognizerRef.current.listen(
         (result: any) => {
           const scores = result.scores
-          
-          // Get labels directly from recognizer to ensure they're current (fixes empty label issue)
+
+          // Get labels directly from recognizer to ensure they're current
           const currentLabels = recognizerRef.current?.wordLabels() || classLabels || []
-          
+
           // Update classLabels state if it's different
           if (currentLabels.length > 0 && JSON.stringify(currentLabels) !== JSON.stringify(classLabels)) {
             setClassLabels(currentLabels)
           }
-          
-          let maxIdx = 0
-          let maxVal = -1
 
-          // Find the highest confidence score (excluding background noise if possible)
-          const newConfidences = scores.map((val: number, i: number) => {
-            const label = currentLabels[i] || ''
-            // Prioritize non-background noise classes
-            if (label !== 'Background Noise' && val > maxVal) {
-              maxVal = val
-              maxIdx = i
+          // Convert scores to percentages for display
+          const newConfidences = scores.map((val: number) => Math.max(0, Math.min(100, val * 100)))
+          setConfidences(newConfidences)
+
+          // Find the absolute highest confidence score first
+          let absoluteMaxIdx = 0
+          let absoluteMaxVal = scores[0]
+          scores.forEach((val: number, i: number) => {
+            if (val > absoluteMaxVal) {
+              absoluteMaxVal = val
+              absoluteMaxIdx = i
             }
-            return Math.max(0, Math.min(100, val * 100))
           })
 
-          // If no non-background class found with high confidence, use the absolute max
-          if (maxVal < threshold) {
+          // Now find the highest confidence excluding Background Noise
+          let maxIdx = absoluteMaxIdx
+          let maxVal = absoluteMaxVal
+
+          // If the highest is Background Noise, find the next highest
+          if (currentLabels[absoluteMaxIdx] === 'Background Noise') {
             maxVal = -1
-            maxIdx = 0
+            maxIdx = -1
             scores.forEach((val: number, i: number) => {
-              if (val > maxVal) {
+              const label = currentLabels[i] || ''
+              if (label !== 'Background Noise' && val > maxVal) {
                 maxVal = val
                 maxIdx = i
               }
             })
+
+            // If still no valid label found, use absolute max anyway
+            if (maxIdx === -1 || maxVal < 0) {
+              maxIdx = absoluteMaxIdx
+              maxVal = absoluteMaxVal
+            }
           }
 
-          setConfidences(newConfidences)
-          
-          // Get top label from current labels array (fixes empty label issue)
+          // Get top label from current labels array
           const topLabel = (currentLabels[maxIdx] || '').trim()
+
+          // Always update the UI with current highest confidence prediction
           setTopLabel(topLabel)
           setTopConfidence(maxVal * 100)
 
-          // Debug: Log all labels and scores
-          if (maxVal >= threshold) {
-            console.log('🔍 Detection details:', {
-              topLabel: `"${topLabel}"`,
-              maxIdx,
-              maxVal: (maxVal * 100).toFixed(1) + '%',
-              currentLabelsCount: currentLabels.length,
-              allLabels: currentLabels,
-              allScores: scores.map((s: number, i: number) => ({
-                label: currentLabels[i] || `[${i}]`,
-                score: (s * 100).toFixed(1) + '%'
-              }))
-            })
-          }
+          const now = Date.now()
+          const timeSinceLastSpoken = now - lastSpokenTimeRef.current
+          const cooldownPassed = timeSinceLastSpoken > cooldown
 
-          // Speak only if threshold is met, label is valid, and it's not background noise
+          // Track settling: same label must be top for settlingMs before we consider speaking
+          if (topLabel !== lastCandidateRef.current) {
+            lastCandidateRef.current = topLabel
+            candidateSinceRef.current = now
+          }
+          const candidateHeldMs = now - candidateSinceRef.current
+          const settled = candidateHeldMs >= settlingMs
+
+          // Speak only when: threshold met, valid label, not background noise,
+          // same label held for settling window, and cooldown passed
           if (maxVal >= threshold && topLabel && topLabel !== 'Background Noise') {
-            // Only speak if it's a new phrase or cooldown has passed
-            if (
-              topLabel !== lastSpokenRef.current ||
-              Date.now() - lastSpokenTimeRef.current > cooldown
-            ) {
-              console.log(`🎤 Detected: "${topLabel}" (confidence: ${(maxVal * 100).toFixed(1)}%)`)
-              const spokenText = getSpokenText(topLabel)
-              console.log(`🔊 Will speak: "${spokenText}"`)
+            if (cooldownPassed && settled) {
+              console.log(`🎤 Detected: "${topLabel}" (${(maxVal * 100).toFixed(1)}%, held ${candidateHeldMs}ms)`)
               speak(topLabel)
+              lastCandidateRef.current = ''
+              candidateSinceRef.current = 0
             }
           } else if (maxVal >= threshold && (!topLabel || topLabel === '')) {
             console.error('❌ ERROR: High confidence but empty label!', {
@@ -537,7 +589,7 @@ export default function LiveDemo() {
         {
           includeSpectrogram: true,
           probabilityThreshold: 0.01,
-          overlapFactor: 0.5,
+          overlapFactor: 0.25,
           invokeCallbackOnNoiseAndUnknown: true,
         }
       )
@@ -600,7 +652,7 @@ export default function LiveDemo() {
             }
             // Wait a bit more to ensure tf.util is available
             await new Promise(resolve => setTimeout(resolve, 200))
-            
+
             if (window.tf && window.tf.util) {
               console.log('✅ TensorFlow.js fully initialized (tf.util available)')
               setTfLoaded(true)
@@ -628,7 +680,7 @@ export default function LiveDemo() {
             console.log('✅ Speech Commands script loaded')
             // Wait a moment for Speech Commands to initialize
             await new Promise(resolve => setTimeout(resolve, 300))
-            
+
             // Verify both are available and properly initialized
             if (window.tf && window.tf.util && window.speechCommands && typeof window.speechCommands.create === 'function') {
               console.log('✅ Speech Commands library ready and functional')
@@ -715,9 +767,8 @@ export default function LiveDemo() {
             </button>
             <div className="flex items-center gap-2 ml-2">
               <div
-                className={`w-3 h-3 rounded-full transition-colors ${
-                  isListening ? 'bg-[#00e676] shadow-lg shadow-[#00e676]/30' : 'bg-[#9aa0a6]'
-                }`}
+                className={`w-3 h-3 rounded-full transition-colors ${isListening ? 'bg-[#00e676] shadow-lg shadow-[#00e676]/30' : 'bg-[#9aa0a6]'
+                  }`}
               />
               <span className="text-sm text-[#9aa0a6]">Microphone</span>
             </div>
@@ -753,9 +804,8 @@ export default function LiveDemo() {
 
               {/* Top Label */}
               <div
-                className={`bg-gradient-to-b from-white/5 to-white/2 rounded-xl p-4 sm:p-6 text-center shadow-xl transition-transform ${
-                  topConfidence >= threshold * 100 ? 'scale-[1.02]' : ''
-                }`}
+                className={`bg-gradient-to-b from-white/5 to-white/2 rounded-xl p-4 sm:p-6 text-center shadow-xl transition-transform ${topConfidence >= threshold * 100 ? 'scale-[1.02]' : ''
+                  }`}
               >
                 <div className="text-2xl sm:text-3xl font-bold text-white mb-2">
                   {topLabel}
@@ -771,9 +821,8 @@ export default function LiveDemo() {
               {/* Avatar */}
               <div className="flex flex-col items-center gap-3 mb-4">
                 <div
-                  className={`relative w-40 h-40 sm:w-48 sm:h-48 rounded-xl overflow-hidden transition-transform bg-gradient-to-br from-[#0b0f12] to-[#0d1216] flex items-center justify-center ${
-                    isSpeaking ? 'scale-125' : ''
-                  }`}
+                  className={`relative w-40 h-40 sm:w-48 sm:h-48 rounded-xl overflow-hidden transition-transform bg-gradient-to-br from-[#0b0f12] to-[#0d1216] flex items-center justify-center ${isSpeaking ? 'scale-125' : ''
+                    }`}
                 >
                   <Image
                     src="/assests/YenMozhi logo.png"
