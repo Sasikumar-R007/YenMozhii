@@ -42,6 +42,7 @@ export default function LiveDemo() {
   const [confidences, setConfidences] = useState<number[]>([])
   const [topLabel, setTopLabel] = useState('Waiting for input...')
   const [topConfidence, setTopConfidence] = useState(0)
+  const [isConfirmed, setIsConfirmed] = useState(false)
   const [isSpeaking, setIsSpeaking] = useState(false)
   const [speakText, setSpeakText] = useState('')
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([])
@@ -59,11 +60,12 @@ export default function LiveDemo() {
   const lastCandidateRef = useRef('')
   const candidateSinceRef = useRef(0)
   // Threshold for detection (0.75 = 75% confidence)
-  const threshold = 0.75
+  // Lowered slightly to allow more detections
+  const threshold = 0.50 // Lowered from 0.70 to allow other detections to trigger (bathroom varuthu is filtered out anyway)
   // Cooldown between spoken outputs (ms) - wait before accepting next detection
   const cooldown = 4000
-  // Settling window (ms) - same label must be top for this long before we speak
-  const settlingMs = 800
+  // Settling window (ms) - same label must be top for this long before we speak (1.5 seconds for confirmation)
+  const settlingMs = 1500
   // Use remote Teachable Machine model (same as old project) - has all 8 classes
   const MODEL_URL = 'https://teachablemachine.withgoogle.com/models/GmzaS6iNB/'
 
@@ -119,7 +121,24 @@ export default function LiveDemo() {
   // Load voices - Filter to show only Tamil and English (3 max) voices
   useEffect(() => {
     const populateVoices = () => {
+      if (!('speechSynthesis' in window)) {
+        console.warn('⚠️ Speech synthesis not available')
+        return
+      }
+
       const availableVoices = speechSynthesis.getVoices()
+
+      // Log all available voices for debugging
+      console.log('🎤 All available voices:', availableVoices.length, availableVoices.map(v => ({
+        name: v.name,
+        lang: v.lang
+      })))
+
+      // If no voices available yet, wait and retry
+      if (availableVoices.length === 0) {
+        console.log('⏳ No voices available yet, will retry...')
+        return
+      }
 
       // Get all Tamil voices
       const tamilVoices = availableVoices.filter((v) =>
@@ -132,7 +151,26 @@ export default function LiveDemo() {
         .slice(0, 3) // Limit to 3 English voices
 
       // Combine: Tamil first, then English (max 3)
-      const filteredVoices = [...tamilVoices, ...englishVoices]
+      let filteredVoices = [...tamilVoices, ...englishVoices]
+
+      // Fallback: If we have very few voices (less than 5), show all available voices
+      // This handles cases where browser has limited voice support
+      if (filteredVoices.length < 3 && availableVoices.length > filteredVoices.length) {
+        console.warn('⚠️ Few filtered voices found, showing all available voices')
+        filteredVoices = availableVoices
+      }
+
+      console.log('🎤 Filtered voices:', {
+        total: filteredVoices.length,
+        tamil: tamilVoices.length,
+        english: englishVoices.length,
+        voices: filteredVoices.map((v, i) => ({
+          index: i,
+          name: v.name,
+          lang: v.lang,
+          isTamil: v.lang.toLowerCase().includes('ta')
+        }))
+      })
 
       setVoices(filteredVoices)
 
@@ -140,26 +178,33 @@ export default function LiveDemo() {
       if (filteredVoices.length > 0 && !selectedVoice) {
         const tamilIndex = tamilVoices.length > 0 ? 0 : 0
         setSelectedVoice(tamilIndex.toString())
-
-        // Log available voices for debugging
-        console.log('🎤 Filtered voices (Tamil + 3 English):', filteredVoices.map((v, i) => ({
-          index: i,
-          name: v.name,
-          lang: v.lang,
-          isTamil: v.lang.toLowerCase().includes('ta')
-        })))
       }
     }
 
+    // Try to populate immediately
     populateVoices()
+
+    // Set up event listener for when voices are loaded
     if ('speechSynthesis' in window) {
       window.speechSynthesis.onvoiceschanged = populateVoices
     }
+
+    // Also retry after a delay in case voices load asynchronously
+    const retryTimeout = setTimeout(() => {
+      populateVoices()
+    }, 1000)
+
+    // Additional retry after longer delay (some browsers load voices very late)
+    const longRetryTimeout = setTimeout(() => {
+      populateVoices()
+    }, 3000)
 
     return () => {
       if (window.speechSynthesis) {
         window.speechSynthesis.onvoiceschanged = null
       }
+      clearTimeout(retryTimeout)
+      clearTimeout(longRetryTimeout)
     }
   }, [selectedVoice])
 
@@ -427,13 +472,17 @@ export default function LiveDemo() {
     utterance.volume = 1.0 // Maximum volume
 
     setIsSpeaking(true)
+    // Update right side with the Tamil text that will be spoken
     setSpeakText(spokenText)
+    console.log(`📝 Right side updated with: "${spokenText}" (from label: "${text}")`)
 
     utterance.onend = () => {
       setIsSpeaking(false)
+      // Clear right side text after speaking completes
       setTimeout(() => {
-        if (speakText === spokenText) setSpeakText('')
-      }, 400)
+        setSpeakText('')
+        console.log('📝 Right side cleared after speech')
+      }, 500)
     }
 
     utterance.onerror = (event: SpeechSynthesisErrorEvent) => {
@@ -498,6 +547,12 @@ export default function LiveDemo() {
           // Get labels directly from recognizer to ensure they're current
           const currentLabels = recognizerRef.current?.wordLabels() || classLabels || []
 
+          // Log model labels on first detection to verify model is loaded correctly
+          if (currentLabels.length > 0 && classLabels.length === 0) {
+            console.log('📋 Model Labels Loaded:', currentLabels)
+            console.log('📊 Model has', currentLabels.length, 'classes')
+          }
+
           // Update classLabels state if it's different
           if (currentLabels.length > 0 && JSON.stringify(currentLabels) !== JSON.stringify(classLabels)) {
             setClassLabels(currentLabels)
@@ -506,6 +561,36 @@ export default function LiveDemo() {
           // Convert scores to percentages for display
           const newConfidences = scores.map((val: number) => Math.max(0, Math.min(100, val * 100)))
           setConfidences(newConfidences)
+
+          // CRITICAL: Log ALL scores every time to see what model is actually detecting
+          // This will help identify if model is biased or if detection is working
+          const allScores = scores.map((s: number, i: number) => ({
+            label: currentLabels[i] || `[${i}]`,
+            score: s,
+            percent: (s * 100).toFixed(1) + '%'
+          })).sort((a: any, b: any) => b.score - a.score)
+
+          // Log top 3 predictions every callback to see real-time detection
+          // Also show which labels are being filtered out
+          const filteredLabels = allScores.filter((s: any) =>
+            s.label === 'Background Noise' || s.label === 'bathroom varuthu'
+          )
+          const validLabels = allScores.filter((s: any) =>
+            s.label !== 'Background Noise' && s.label !== 'bathroom varuthu'
+          )
+          console.log('🎯 Model Output (Top 3):', allScores.slice(0, 3).map((s: any) =>
+            `${s.label}: ${s.percent}`
+          ).join(' | '))
+          if (filteredLabels.length > 0) {
+            console.log('🚫 Filtered out:', filteredLabels.map((s: any) =>
+              `${s.label}: ${s.percent}`
+            ).join(', '))
+          }
+          if (validLabels.length > 0) {
+            console.log('✅ Valid detections:', validLabels.slice(0, 3).map((s: any) =>
+              `${s.label}: ${s.percent}`
+            ).join(', '))
+          }
 
           // Find the absolute highest confidence score first
           let absoluteMaxIdx = 0
@@ -517,56 +602,114 @@ export default function LiveDemo() {
             }
           })
 
-          // Now find the highest confidence excluding Background Noise
-          let maxIdx = absoluteMaxIdx
-          let maxVal = absoluteMaxVal
+          // ALWAYS exclude Background Noise and bathroom varuthu from detection
+          // Find the highest confidence among valid labels (excluding Background Noise and bathroom varuthu)
+          let maxIdx = -1
+          let maxVal = -1
 
-          // If the highest is Background Noise, find the next highest
-          if (currentLabels[absoluteMaxIdx] === 'Background Noise') {
-            maxVal = -1
-            maxIdx = -1
-            scores.forEach((val: number, i: number) => {
-              const label = currentLabels[i] || ''
-              if (label !== 'Background Noise' && val > maxVal) {
-                maxVal = val
-                maxIdx = i
-              }
-            })
-
-            // If still no valid label found, use absolute max anyway
-            if (maxIdx === -1 || maxVal < 0) {
-              maxIdx = absoluteMaxIdx
-              maxVal = absoluteMaxVal
+          scores.forEach((val: number, i: number) => {
+            const label = currentLabels[i] || ''
+            // Only consider valid labels (not Background Noise, not bathroom varuthu)
+            if (label !== 'Background Noise' && label !== 'bathroom varuthu' && val > maxVal) {
+              maxVal = val
+              maxIdx = i
             }
+          })
+
+          // Get top label from current labels array (only if we found a valid one)
+          let topLabel = ''
+          if (maxIdx >= 0 && currentLabels[maxIdx]) {
+            topLabel = (currentLabels[maxIdx] || '').trim()
           }
 
-          // Get top label from current labels array
-          const topLabel = (currentLabels[maxIdx] || '').trim()
+          const now = Date.now()
+
+          // If no valid label found (all are Background Noise or bathroom varuthu), or confidence too low
+          // FILTER OUT "bathroom varuthu" completely to test other detections
+          // Lower threshold to 0.25 (25%) to allow other detections to trigger
+          if (maxIdx === -1 || maxVal < 0.25 || topLabel === 'Background Noise' || topLabel === 'bathroom varuthu' || !topLabel) {
+            topLabel = 'Waiting for input...'
+            setTopConfidence(0)
+            // Clear right side when no valid detection or when bathroom varuthu is detected
+            // Also clear if right side shows bathroom text (குளியலறைக்கு போகணும்)
+            if ((speakText && !isSpeaking) || speakText === 'குளியலறைக்கு போகணும்') {
+              setSpeakText('')
+              console.log('📝 Right side cleared: invalid detection or bathroom varuthu filtered')
+            }
+            // Reset candidate tracking when showing waiting state
+            if (lastCandidateRef.current !== 'Waiting for input...') {
+              lastCandidateRef.current = 'Waiting for input...'
+              candidateSinceRef.current = now
+            }
+          } else {
+            setTopConfidence(maxVal * 100)
+            console.log(`✅ Valid detection: "${topLabel}" (${(maxVal * 100).toFixed(1)}%)`)
+          }
 
           // Always update the UI with current highest confidence prediction
           setTopLabel(topLabel)
-          setTopConfidence(maxVal * 100)
-
-          const now = Date.now()
           const timeSinceLastSpoken = now - lastSpokenTimeRef.current
           const cooldownPassed = timeSinceLastSpoken > cooldown
 
           // Track settling: same label must be top for settlingMs before we consider speaking
-          if (topLabel !== lastCandidateRef.current) {
+          // IMPORTANT: Reset candidate timer when label changes (even if below threshold)
+          // This prevents getting stuck on one prediction
+          const previousCandidate = lastCandidateRef.current
+          if (topLabel !== previousCandidate) {
             lastCandidateRef.current = topLabel
             candidateSinceRef.current = now
+            // Log when detection changes to help debug
+            if (topLabel && topLabel !== 'Background Noise') {
+              console.log(`🔄 Detection changed: "${previousCandidate}" → "${topLabel}" (${(maxVal * 100).toFixed(1)}%)`)
+            }
           }
           const candidateHeldMs = now - candidateSinceRef.current
           const settled = candidateHeldMs >= settlingMs
 
-          // Speak only when: threshold met, valid label, not background noise,
-          // same label held for settling window, and cooldown passed
-          if (maxVal >= threshold && topLabel && topLabel !== 'Background Noise') {
+          // Update confirmation state - show when detection is confirmed (held for settling time)
+          if (maxVal >= threshold && topLabel && topLabel !== 'Background Noise' && settled && cooldownPassed) {
+            setIsConfirmed(true)
+          } else {
+            setIsConfirmed(false)
+          }
+
+          // Force reset if we've been stuck on same label for too long (10 seconds)
+          // This helps recover from stuck states
+          if (candidateHeldMs > 10000 && previousCandidate === topLabel && topLabel === lastSpokenRef.current) {
+            console.warn('⚠️ Stuck on same label for 10s, resetting candidate tracking')
+            lastCandidateRef.current = ''
+            candidateSinceRef.current = 0
+          }
+
+          // Additional detailed logging when top prediction changes significantly
+          if (topLabel !== previousCandidate && maxVal >= 0.5) {
+            console.log('📊 All Scores:', allScores.map((s: any) =>
+              `${s.label}: ${s.percent}`
+            ).join(', '))
+          }
+
+          // Speak only when: threshold met, valid label, not background noise, not bathroom varuthu,
+          // same label held for settling window (1.5s confirmation), and cooldown passed
+          if (maxVal >= threshold && topLabel && topLabel !== 'Background Noise' && topLabel !== 'bathroom varuthu') {
             if (cooldownPassed && settled) {
-              console.log(`🎤 Detected: "${topLabel}" (${(maxVal * 100).toFixed(1)}%, held ${candidateHeldMs}ms)`)
+              // Detection confirmed - held for 1.5 seconds, now speak
+              const confirmationPercent = Math.min(100, (candidateHeldMs / settlingMs) * 100)
+              console.log(`✅ CONFIRMED: "${topLabel}" (${(maxVal * 100).toFixed(1)}%, held ${(candidateHeldMs / 1000).toFixed(1)}s)`)
+              console.log(`🔊 Speaking now...`)
               speak(topLabel)
+              // Reset candidate tracking after speaking
               lastCandidateRef.current = ''
               candidateSinceRef.current = 0
+              setIsConfirmed(false)
+            } else {
+              // Show progress toward confirmation
+              if (settled && !cooldownPassed) {
+                const remainingCooldown = ((cooldown - timeSinceLastSpoken) / 1000).toFixed(1)
+                console.log(`⏸️ Confirmed but waiting for cooldown: ${remainingCooldown}s remaining`)
+              } else if (!settled) {
+                const remainingSettle = ((settlingMs - candidateHeldMs) / 1000).toFixed(1)
+                console.log(`⏳ Confirming detection: ${(candidateHeldMs / 1000).toFixed(1)}s / ${(settlingMs / 1000).toFixed(1)}s (${remainingSettle}s remaining)`)
+              }
             }
           } else if (maxVal >= threshold && (!topLabel || topLabel === '')) {
             console.error('❌ ERROR: High confidence but empty label!', {
@@ -618,6 +761,24 @@ export default function LiveDemo() {
     setIsListening(false)
     setIsSpeaking(false)
     setSpeakText('')
+  }
+
+  // Reset recognition state (useful when stuck)
+  const resetRecognition = () => {
+    console.log('🔄 Resetting recognition state...')
+    // Reset all tracking refs
+    lastSpokenRef.current = ''
+    lastSpokenTimeRef.current = 0
+    lastCandidateRef.current = ''
+    candidateSinceRef.current = 0
+    // Reset UI state
+    setTopLabel('Waiting for input...')
+    setTopConfidence(0)
+    setConfidences(new Array(classLabels.length).fill(0))
+    setSpeakText('')
+    setIsSpeaking(false)
+    setIsConfirmed(false)
+    console.log('✅ Recognition state reset')
   }
 
   // Cleanup on unmount
@@ -765,6 +926,15 @@ export default function LiveDemo() {
             >
               Stop
             </button>
+            {isListening && (
+              <button
+                onClick={resetRecognition}
+                className="px-4 py-2 bg-yellow-600/80 text-white font-semibold rounded-lg hover:bg-yellow-600 transition-colors text-sm"
+                title="Reset detection state if stuck on one output"
+              >
+                Reset
+              </button>
+            )}
             <div className="flex items-center gap-2 ml-2">
               <div
                 className={`w-3 h-3 rounded-full transition-colors ${isListening ? 'bg-[#00e676] shadow-lg shadow-[#00e676]/30' : 'bg-[#9aa0a6]'
@@ -804,15 +974,24 @@ export default function LiveDemo() {
 
               {/* Top Label */}
               <div
-                className={`bg-gradient-to-b from-white/5 to-white/2 rounded-xl p-4 sm:p-6 text-center shadow-xl transition-transform ${topConfidence >= threshold * 100 ? 'scale-[1.02]' : ''
+                className={`bg-gradient-to-b from-white/5 to-white/2 rounded-xl p-4 sm:p-6 text-center shadow-xl transition-all duration-300 ${isConfirmed
+                  ? 'scale-[1.05] border-2 border-[#00e676] shadow-lg shadow-[#00e676]/30'
+                  : topConfidence >= threshold * 100
+                    ? 'scale-[1.02]'
+                    : ''
                   }`}
               >
                 <div className="text-2xl sm:text-3xl font-bold text-white mb-2">
                   {topLabel}
                 </div>
-                <div className="text-sm text-[#9aa0a6]">
+                <div className="text-sm text-[#9aa0a6] mb-2">
                   {topConfidence > 0 ? `${topConfidence.toFixed(2)}%` : '—'}
                 </div>
+                {isConfirmed && (
+                  <div className="text-xs text-[#00e676] font-semibold animate-pulse">
+                    ✓ Confirmed - Speaking...
+                  </div>
+                )}
               </div>
             </div>
 
